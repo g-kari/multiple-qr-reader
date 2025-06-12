@@ -398,14 +398,18 @@ class MultipleQRReader {
                 console.error('Direct QR detection error:', error);
             }
             
-            // If no QR found and this is not Android, try simplified region detection
-            if (qrCodes.length === 0 && !isAndroid) {
-                const regions = this.getImageRegions(imageData, true); // Get fewer regions for mobile
-                for (let i = 0; i < Math.min(regions.length, 2); i++) { // Process max 2 regions
-                    try {
-                        const region = regions[i];
-                        const qrCode = jsQR(region.data, region.width, region.height);
-                        if (qrCode) {
+            // For all mobile devices, also try simplified region detection for multiple QR codes
+            // Use fewer regions on Android for performance, more on other mobile devices
+            const maxRegions = isAndroid ? 2 : 4;
+            const regions = this.getImageRegions(imageData, true); // Get fewer regions for mobile
+            for (let i = 0; i < Math.min(regions.length, maxRegions); i++) {
+                try {
+                    const region = regions[i];
+                    const qrCode = jsQR(region.data, region.width, region.height);
+                    if (qrCode) {
+                        // Check if this QR code is already found to avoid duplicates
+                        const exists = qrCodes.some(existing => existing.data === qrCode.data);
+                        if (!exists) {
                             qrCodes.push({
                                 data: qrCode.data,
                                 location: qrCode.location,
@@ -413,11 +417,10 @@ class MultipleQRReader {
                                 regionInfo: '領域検出',
                                 confidence: 0.8
                             });
-                            break; // Found one, stop processing more regions
                         }
-                    } catch (error) {
-                        console.error(`Region QR detection error ${i}:`, error);
                     }
+                } catch (error) {
+                    console.error(`Region QR detection error ${i}:`, error);
                 }
             }
         } else {
@@ -436,14 +439,18 @@ class MultipleQRReader {
                     try {
                         const qrCode = jsQR(regionImageData.data, regionImageData.width, regionImageData.height);
                         if (qrCode) {
-                            const adjustedLocation = this.adjustLocationToFullImage(qrCode.location, region);
-                            qrCodes.push({
-                                data: qrCode.data,
-                                location: adjustedLocation,
-                                region: 'YOLO-リアルタイム',
-                                regionInfo: `信頼度: ${(region.confidence * 100).toFixed(1)}%`,
-                                confidence: region.confidence
-                            });
+                            // Check if this QR code is already found to avoid duplicates
+                            const exists = qrCodes.some(existing => existing.data === qrCode.data);
+                            if (!exists) {
+                                const adjustedLocation = this.adjustLocationToFullImage(qrCode.location, region);
+                                qrCodes.push({
+                                    data: qrCode.data,
+                                    location: adjustedLocation,
+                                    region: 'YOLO-リアルタイム',
+                                    regionInfo: `信頼度: ${(region.confidence * 100).toFixed(1)}%`,
+                                    confidence: region.confidence
+                                });
+                            }
                         }
                     } catch (error) {
                         console.error('Real-time QR detection error:', error);
