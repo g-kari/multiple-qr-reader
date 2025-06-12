@@ -12,6 +12,13 @@ class MultipleQRReader {
         this.isScanning = false;
         this.scanInterval = null;
         
+        // Performance tracking for adaptive scanning
+        this.lastScanTime = 0;
+        this.scanPerformanceHistory = [];
+        this.currentScanInterval = 200; // Default interval
+        this.lastDetectionTime = 0; // Track when we last found QR codes
+        this.resultClearTimeout = null;
+        
         // Initialize WebAssembly and YOLO modules
         this.wasmProcessor = new WasmImageProcessor();
         this.yoloDetector = new YOLOQRDetector();
@@ -63,12 +70,33 @@ class MultipleQRReader {
             this.updateStatus('カメラを開始しています...');
             this.updateProgress(25);
 
+            // Detect device type for optimized camera settings
+            const isAndroid = /Android/i.test(navigator.userAgent);
+            const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            
+            // Optimize camera constraints for mobile devices
+            let videoConstraints = {
+                facingMode: 'environment'
+            };
+            
+            if (isAndroid) {
+                // Android-optimized settings for better performance
+                videoConstraints.width = { ideal: 1280, max: 1920 };
+                videoConstraints.height = { ideal: 720, max: 1080 };
+                videoConstraints.frameRate = { ideal: 30, max: 30 };
+            } else if (isMobile) {
+                // Other mobile devices
+                videoConstraints.width = { ideal: 1280 };
+                videoConstraints.height = { ideal: 720 };
+                videoConstraints.frameRate = { ideal: 30 };
+            } else {
+                // Desktop settings
+                videoConstraints.width = { ideal: 1280 };
+                videoConstraints.height = { ideal: 720 };
+            }
+
             this.stream = await navigator.mediaDevices.getUserMedia({
-                video: { 
-                    facingMode: 'environment',
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                }
+                video: videoConstraints
             });
 
             this.video.srcObject = this.stream;
@@ -109,9 +137,32 @@ class MultipleQRReader {
 
     startContinuousScanning() {
         this.isScanning = true;
+        
+        // Detect device type and adjust scanning interval accordingly
+        const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const isAndroid = /Android/i.test(navigator.userAgent);
+        
+        // Use faster scanning for better real-time experience
+        // Android devices get optimized settings
+        let scanInterval = 200; // Default 200ms for better real-time feel
+        let deviceInfo = 'デスクトップ';
+        
+        if (isAndroid) {
+            // Slightly slower on Android to maintain performance
+            scanInterval = 250;
+            deviceInfo = 'Android';
+        } else if (isMobile) {
+            // Other mobile devices
+            scanInterval = 300;
+            deviceInfo = 'モバイル';
+        }
+        
+        // Update status to show real-time scanning is active
+        this.updateStatus(`リアルタイムスキャン中 (${deviceInfo}: ${scanInterval}ms間隔) - QRコードをカメラに向けてください`);
+        
         this.scanInterval = setInterval(() => {
             this.scanVideoFrame();
-        }, 500); // Scan every 500ms
+        }, scanInterval);
     }
 
     stopContinuousScanning() {
@@ -120,6 +171,9 @@ class MultipleQRReader {
             clearInterval(this.scanInterval);
             this.scanInterval = null;
         }
+        
+        // Update status when stopping real-time scanning
+        this.updateStatus('リアルタイムスキャンが停止されました');
     }
 
     captureFromCamera() {
@@ -143,12 +197,42 @@ class MultipleQRReader {
             return;
         }
 
+        const startTime = performance.now();
+        
         this.canvas.width = this.video.videoWidth;
         this.canvas.height = this.video.videoHeight;
         this.ctx.drawImage(this.video, 0, 0);
         
         // Process frame for QR codes (lighter processing for real-time)
-        this.processImageQuick(this.canvas);
+        this.processImageQuick(this.canvas).then(() => {
+            // Track performance for adaptive scanning
+            const scanDuration = performance.now() - startTime;
+            this.trackScanPerformance(scanDuration);
+        }).catch(error => {
+            console.error('Scan frame error:', error);
+        });
+    }
+    
+    trackScanPerformance(duration) {
+        // Keep track of recent scan performance
+        this.scanPerformanceHistory.push(duration);
+        
+        // Keep only the last 10 measurements
+        if (this.scanPerformanceHistory.length > 10) {
+            this.scanPerformanceHistory.shift();
+        }
+        
+        // If performance is consistently slow on mobile, adapt the scanning strategy
+        if (this.scanPerformanceHistory.length >= 5) {
+            const avgDuration = this.scanPerformanceHistory.reduce((a, b) => a + b, 0) / this.scanPerformanceHistory.length;
+            const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            
+            // If scans are taking too long on mobile (>100ms), we need to optimize further
+            if (isMobile && avgDuration > 100) {
+                console.log(`Performance warning: Average scan time ${avgDuration.toFixed(1)}ms`);
+                // This could trigger further optimizations in the future
+            }
+        }
     }
 
     handleFileSelect(event) {
@@ -290,46 +374,92 @@ class MultipleQRReader {
         // Lighter processing for real-time scanning
         const imageData = this.ctx.getImageData(0, 0, canvas.width, canvas.height);
         
-        // Use a simplified YOLO detection for real-time
-        const regions = await this.yoloDetector.detectQRRegions(imageData);
+        // Detect device type for performance optimization
+        const isAndroid = /Android/i.test(navigator.userAgent);
+        const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         
-        if (regions.length > 0) {
-            const qrCodes = [];
+        let qrCodes = [];
+        
+        if (isMobile) {
+            // For mobile devices, use simpler detection first
+            try {
+                // Try direct detection on full image first (fastest method)
+                const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
+                if (qrCode) {
+                    qrCodes.push({
+                        data: qrCode.data,
+                        location: qrCode.location,
+                        region: 'full-リアルタイム',
+                        regionInfo: 'ダイレクト検出',
+                        confidence: 1.0
+                    });
+                }
+            } catch (error) {
+                console.error('Direct QR detection error:', error);
+            }
             
-            // Process only the most confident regions for real-time
-            const topRegions = regions
-                .sort((a, b) => b.confidence - a.confidence)
-                .slice(0, 3); // Process top 3 regions only
-            
-            for (const region of topRegions) {
-                const regionImageData = this.yoloDetector.extractRegion(imageData, region);
-                
-                try {
-                    const qrCode = jsQR(regionImageData.data, regionImageData.width, regionImageData.height);
-                    if (qrCode) {
-                        const adjustedLocation = this.adjustLocationToFullImage(qrCode.location, region);
-                        qrCodes.push({
-                            data: qrCode.data,
-                            location: adjustedLocation,
-                            region: 'YOLO-リアルタイム',
-                            regionInfo: `信頼度: ${(region.confidence * 100).toFixed(1)}%`,
-                            confidence: region.confidence
-                        });
+            // If no QR found and this is not Android, try simplified region detection
+            if (qrCodes.length === 0 && !isAndroid) {
+                const regions = this.getImageRegions(imageData, true); // Get fewer regions for mobile
+                for (let i = 0; i < Math.min(regions.length, 2); i++) { // Process max 2 regions
+                    try {
+                        const region = regions[i];
+                        const qrCode = jsQR(region.data, region.width, region.height);
+                        if (qrCode) {
+                            qrCodes.push({
+                                data: qrCode.data,
+                                location: qrCode.location,
+                                region: `region-${i}-リアルタイム`,
+                                regionInfo: '領域検出',
+                                confidence: 0.8
+                            });
+                            break; // Found one, stop processing more regions
+                        }
+                    } catch (error) {
+                        console.error(`Region QR detection error ${i}:`, error);
                     }
-                } catch (error) {
-                    console.error('Real-time QR detection error:', error);
                 }
             }
-            
-            if (qrCodes.length > 0) {
-                this.displayResults(qrCodes, 'リアルタイム');
-            }
         } else {
-            // Fallback to traditional quick detection
-            const qrCodes = this.detectMultipleQRCodes(imageData);
-            if (qrCodes.length > 0) {
-                this.displayResults(qrCodes, 'リアルタイム');
+            // For desktop, use YOLO detection as before
+            const regions = await this.yoloDetector.detectQRRegions(imageData);
+            
+            if (regions.length > 0) {
+                // Process only the most confident regions for real-time
+                const topRegions = regions
+                    .sort((a, b) => b.confidence - a.confidence)
+                    .slice(0, 3); // Process top 3 regions only
+                
+                for (const region of topRegions) {
+                    const regionImageData = this.yoloDetector.extractRegion(imageData, region);
+                    
+                    try {
+                        const qrCode = jsQR(regionImageData.data, regionImageData.width, regionImageData.height);
+                        if (qrCode) {
+                            const adjustedLocation = this.adjustLocationToFullImage(qrCode.location, region);
+                            qrCodes.push({
+                                data: qrCode.data,
+                                location: adjustedLocation,
+                                region: 'YOLO-リアルタイム',
+                                regionInfo: `信頼度: ${(region.confidence * 100).toFixed(1)}%`,
+                                confidence: region.confidence
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Real-time QR detection error:', error);
+                    }
+                }
+            } else {
+                // Fallback to traditional quick detection
+                const qrCodesTraditional = this.detectMultipleQRCodes(imageData);
+                if (qrCodesTraditional.length > 0) {
+                    qrCodes = qrCodesTraditional;
+                }
             }
+        }
+        
+        if (qrCodes.length > 0) {
+            this.displayResults(qrCodes, 'リアルタイム');
         }
     }
 
@@ -375,21 +505,37 @@ class MultipleQRReader {
         return qrCodes;
     }
 
-    getImageRegions(imageData) {
+    getImageRegions(imageData, simplifiedForMobile = false) {
         const regions = [];
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         
-        // Divide image into quadrants
-        const halfWidth = Math.floor(imageData.width / 2);
-        const halfHeight = Math.floor(imageData.height / 2);
+        // Divide image into quadrants (or just center regions for mobile)
+        let quadrants;
         
-        const quadrants = [
-            { x: 0, y: 0, width: halfWidth, height: halfHeight, name: '左上' },
-            { x: halfWidth, y: 0, width: halfWidth, height: halfHeight, name: '右上' },
-            { x: 0, y: halfHeight, width: halfWidth, height: halfHeight, name: '左下' },
-            { x: halfWidth, y: halfHeight, width: halfWidth, height: halfHeight, name: '右下' }
-        ];
+        if (simplifiedForMobile) {
+            // For mobile, only process center and top regions for better performance
+            const centerX = Math.floor(imageData.width * 0.25);
+            const centerY = Math.floor(imageData.height * 0.25);
+            const centerWidth = Math.floor(imageData.width * 0.5);
+            const centerHeight = Math.floor(imageData.height * 0.5);
+            
+            quadrants = [
+                { x: centerX, y: centerY, width: centerWidth, height: centerHeight, name: '中央' },
+                { x: 0, y: 0, width: imageData.width, height: Math.floor(imageData.height * 0.5), name: '上半分' }
+            ];
+        } else {
+            // Full quadrant processing for desktop
+            const halfWidth = Math.floor(imageData.width / 2);
+            const halfHeight = Math.floor(imageData.height / 2);
+            
+            quadrants = [
+                { x: 0, y: 0, width: halfWidth, height: halfHeight, name: '左上' },
+                { x: halfWidth, y: 0, width: halfWidth, height: halfHeight, name: '右上' },
+                { x: 0, y: halfHeight, width: halfWidth, height: halfHeight, name: '左下' },
+                { x: halfWidth, y: halfHeight, width: halfWidth, height: halfHeight, name: '右下' }
+            ];
+        }
 
         quadrants.forEach(quad => {
             canvas.width = quad.width;
@@ -423,6 +569,28 @@ class MultipleQRReader {
 
     displayResults(qrCodes, source) {
         if (source === 'リアルタイム') {
+            // Update last detection time
+            this.lastDetectionTime = Date.now();
+            
+            // Clear any existing timeout
+            if (this.resultClearTimeout) {
+                clearTimeout(this.resultClearTimeout);
+            }
+            
+            // Set timeout to clear results after 3 seconds of no detection
+            this.resultClearTimeout = setTimeout(() => {
+                if (this.isScanning && Date.now() - this.lastDetectionTime > 3000) {
+                    this.clearResults();
+                    // Don't clear the status, just show that scanning continues
+                    const currentStatus = this.statusElement.textContent;
+                    if (currentStatus.includes('リアルタイムスキャン中')) {
+                        // Keep the scanning status
+                    } else {
+                        this.updateStatus('リアルタイムスキャン中 - QRコードが見つかりません');
+                    }
+                }
+            }, 3500);
+            
             // For real-time, only update if we have new results
             const existingResults = this.resultsContainer.querySelectorAll('.qr-result');
             if (existingResults.length > 0) {
