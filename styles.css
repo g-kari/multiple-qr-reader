@@ -1,0 +1,211 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    background-color: #f5f5f5;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 40px;
+    padding: 20px;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+header h1 {
+    color: #2c3e50;
+    margin-bottom: 10px;
+}
+
+header p {
+    color: #7f8c8d;
+}
+
+main {
+    display: grid;
+    gap: 30px;
+}
+
+.input-section {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+}
+
+.camera-section, .file-section {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.camera-section h2, .file-section h2 {
+    margin-bottom: 20px;
+    color: #2c3e50;
+}
+
+.camera-container {
+    position: relative;
+    margin-bottom: 20px;
+}
+
+#video {
+    width: 100%;
+    max-width: 400px;
+    height: auto;
+    border-radius: 8px;
+    border: 2px solid #ecf0f1;
+}
+
+.camera-controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.camera-controls button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    background: #3498db;
+    color: white;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.3s;
+}
+
+.camera-controls button:hover {
+    background: #2980b9;
+}
+
+.camera-controls button:disabled {
+    background: #bdc3c7;
+    cursor: not-allowed;
+}
+
+.file-input-container {
+    position: relative;
+}
+
+#fileInput {
+    display: none;
+}
+
+label[for="fileInput"] {
+    display: inline-block;
+    padding: 15px 30px;
+    background: #27ae60;
+    color: white;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.3s;
+    text-align: center;
+    width: 100%;
+}
+
+label[for="fileInput"]:hover {
+    background: #219a52;
+}
+
+.processing-section, .results-section {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.processing-section h2, .results-section h2 {
+    margin-bottom: 20px;
+    color: #2c3e50;
+}
+
+#status {
+    padding: 10px;
+    background: #ecf0f1;
+    border-radius: 5px;
+    margin-bottom: 15px;
+    font-weight: bold;
+}
+
+.progress-container {
+    width: 100%;
+    height: 10px;
+    background: #ecf0f1;
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: #3498db;
+    width: 0%;
+    transition: width 0.3s;
+}
+
+.results-container {
+    min-height: 100px;
+}
+
+.qr-result {
+    background: #e8f5e8;
+    border: 1px solid #27ae60;
+    border-radius: 5px;
+    padding: 15px;
+    margin-bottom: 10px;
+}
+
+.qr-result h3 {
+    color: #27ae60;
+    margin-bottom: 10px;
+}
+
+.qr-result .qr-data {
+    word-break: break-all;
+    background: white;
+    padding: 10px;
+    border-radius: 3px;
+    font-family: monospace;
+}
+
+.qr-result .qr-position {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #7f8c8d;
+}
+
+.error {
+    background: #ffeaa7;
+    border: 1px solid #fdcb6e;
+    color: #e17055;
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 10px;
+}
+
+@media (max-width: 768px) {
+    .input-section {
+        grid-template-columns: 1fr;
+    }
+    
+    .camera-controls {
+        justify-content: center;
+    }
+    
+    .container {
+        padding: 10px;
+    }
+}

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiple QR Reader</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>複数QRコード読み取り</h1>
+            <p>複数のQRコードを一度に読み取ります</p>
+        </header>
+
+        <main>
+            <div class="input-section">
+                <div class="camera-section">
+                    <h2>カメラで読み取り</h2>
+                    <div class="camera-container">
+                        <video id="video" autoplay muted playsinline></video>
+                        <canvas id="canvas" style="display: none;"></canvas>
+                    </div>
+                    <div class="camera-controls">
+                        <button id="startCamera">カメラ開始</button>
+                        <button id="stopCamera" disabled>カメラ停止</button>
+                        <button id="captureImage">撮影</button>
+                    </div>
+                </div>
+
+                <div class="file-section">
+                    <h2>ファイルから読み取り</h2>
+                    <div class="file-input-container">
+                        <input type="file" id="fileInput" accept="image/*" multiple>
+                        <label for="fileInput">画像ファイルを選択</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="processing-section">
+                <h2>処理状況</h2>
+                <div id="status">準備完了</div>
+                <div class="progress-container">
+                    <div id="progressBar" class="progress-bar"></div>
+                </div>
+            </div>
+
+            <div class="results-section">
+                <h2>読み取り結果</h2>
+                <div id="results" class="results-container">
+                    <p>まだQRコードが読み取られていません</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
