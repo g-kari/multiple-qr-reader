@@ -16,6 +16,8 @@ class MultipleQRReader {
         this.lastScanTime = 0;
         this.scanPerformanceHistory = [];
         this.currentScanInterval = 200; // Default interval
+        this.lastDetectionTime = 0; // Track when we last found QR codes
+        this.resultClearTimeout = null;
         
         // Initialize WebAssembly and YOLO modules
         this.wasmProcessor = new WasmImageProcessor();
@@ -143,14 +145,20 @@ class MultipleQRReader {
         // Use faster scanning for better real-time experience
         // Android devices get optimized settings
         let scanInterval = 200; // Default 200ms for better real-time feel
+        let deviceInfo = 'デスクトップ';
         
         if (isAndroid) {
             // Slightly slower on Android to maintain performance
             scanInterval = 250;
+            deviceInfo = 'Android';
         } else if (isMobile) {
             // Other mobile devices
             scanInterval = 300;
+            deviceInfo = 'モバイル';
         }
+        
+        // Update status to show real-time scanning is active
+        this.updateStatus(`リアルタイムスキャン中 (${deviceInfo}: ${scanInterval}ms間隔) - QRコードをカメラに向けてください`);
         
         this.scanInterval = setInterval(() => {
             this.scanVideoFrame();
@@ -163,6 +171,9 @@ class MultipleQRReader {
             clearInterval(this.scanInterval);
             this.scanInterval = null;
         }
+        
+        // Update status when stopping real-time scanning
+        this.updateStatus('リアルタイムスキャンが停止されました');
     }
 
     captureFromCamera() {
@@ -558,6 +569,28 @@ class MultipleQRReader {
 
     displayResults(qrCodes, source) {
         if (source === 'リアルタイム') {
+            // Update last detection time
+            this.lastDetectionTime = Date.now();
+            
+            // Clear any existing timeout
+            if (this.resultClearTimeout) {
+                clearTimeout(this.resultClearTimeout);
+            }
+            
+            // Set timeout to clear results after 3 seconds of no detection
+            this.resultClearTimeout = setTimeout(() => {
+                if (this.isScanning && Date.now() - this.lastDetectionTime > 3000) {
+                    this.clearResults();
+                    // Don't clear the status, just show that scanning continues
+                    const currentStatus = this.statusElement.textContent;
+                    if (currentStatus.includes('リアルタイムスキャン中')) {
+                        // Keep the scanning status
+                    } else {
+                        this.updateStatus('リアルタイムスキャン中 - QRコードが見つかりません');
+                    }
+                }
+            }, 3500);
+            
             // For real-time, only update if we have new results
             const existingResults = this.resultsContainer.querySelectorAll('.qr-result');
             if (existingResults.length > 0) {
