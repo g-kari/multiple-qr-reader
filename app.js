@@ -12,8 +12,40 @@ class MultipleQRReader {
         this.isScanning = false;
         this.scanInterval = null;
         
+        // Initialize WebAssembly and YOLO modules
+        this.wasmProcessor = new WasmImageProcessor();
+        this.yoloDetector = new YOLOQRDetector();
+        
         this.initializeEventListeners();
-        this.updateStatus('準備完了');
+        this.initializeModules();
+    }
+
+    async initializeModules() {
+        this.updateStatus('モジュールを初期化しています...');
+        this.updateProgress(25);
+        
+        try {
+            const wasmReady = await this.wasmProcessor.isReady();
+            this.updateProgress(50);
+            
+            if (wasmReady) {
+                this.updateStatus('WebAssembly モジュールが準備できました');
+            } else {
+                this.updateStatus('WebAssembly フォールバックモードで動作します');
+            }
+            
+            this.updateProgress(100);
+            
+            setTimeout(() => {
+                this.updateStatus('準備完了 - WebAssembly & YOLO 対応');
+                this.updateProgress(0);
+            }, 1000);
+            
+        } catch (error) {
+            console.error('Module initialization error:', error);
+            this.updateStatus('基本モードで準備完了');
+            this.updateProgress(0);
+        }
     }
 
     initializeEventListeners() {
@@ -158,25 +190,146 @@ class MultipleQRReader {
         reader.readAsDataURL(file);
     }
 
-    processImage(canvas, source = 'カメラ') {
+    async processImage(canvas, source = 'カメラ') {
         const imageData = this.ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const qrCodes = this.detectMultipleQRCodes(imageData);
         
-        if (qrCodes.length > 0) {
-            this.displayResults(qrCodes, source);
-            this.updateStatus(`${qrCodes.length}個のQRコードが見つかりました`);
-        } else if (source !== 'カメラ') {
-            this.updateStatus('QRコードが見つかりませんでした');
+        // Use YOLO detection to find QR code regions
+        this.updateStatus('YOLO でQRコード領域を検出中...');
+        const regions = await this.yoloDetector.detectQRRegions(imageData);
+        
+        if (regions.length > 0) {
+            this.updateStatus(`${regions.length}個の候補領域が見つかりました。QRコードを解析中...`);
+            
+            const qrCodes = [];
+            
+            // Process each detected region
+            for (let i = 0; i < regions.length; i++) {
+                const region = regions[i];
+                const regionImageData = this.yoloDetector.extractRegion(imageData, region);
+                
+                // Apply WebAssembly image processing for better detection
+                const processedImageData = await this.wasmProcessor.convertToGrayscale(regionImageData);
+                const enhancedImageData = this.wasmProcessor.enhanceContrast(processedImageData, 1.3);
+                
+                // Try to detect QR codes in this region
+                try {
+                    const qrCode = jsQR(enhancedImageData.data, enhancedImageData.width, enhancedImageData.height);
+                    if (qrCode) {
+                        // Adjust coordinates to full image
+                        const adjustedLocation = this.adjustLocationToFullImage(qrCode.location, region);
+                        
+                        qrCodes.push({
+                            data: qrCode.data,
+                            location: adjustedLocation,
+                            region: `YOLO-Region-${i}`,
+                            regionInfo: `信頼度: ${(region.confidence * 100).toFixed(1)}%`,
+                            confidence: region.confidence
+                        });
+                    }
+                } catch (error) {
+                    console.error(`QR detection error in region ${i}:`, error);
+                }
+                
+                this.updateProgress((i + 1) / regions.length * 100);
+            }
+            
+            // Also try full image detection as fallback
+            const fullImageQR = this.detectMultipleQRCodes(imageData);
+            fullImageQR.forEach(qr => {
+                const exists = qrCodes.some(existing => existing.data === qr.data);
+                if (!exists) {
+                    qrCodes.push(qr);
+                }
+            });
+            
+            if (qrCodes.length > 0) {
+                this.displayResults(qrCodes, source);
+                this.updateStatus(`${qrCodes.length}個のQRコードが見つかりました (YOLO + WebAssembly)`);
+            } else {
+                this.updateStatus('QRコードが見つかりませんでした');
+            }
+        } else {
+            // Fallback to traditional detection
+            const qrCodes = this.detectMultipleQRCodes(imageData);
+            if (qrCodes.length > 0) {
+                this.displayResults(qrCodes, source);
+                this.updateStatus(`${qrCodes.length}個のQRコードが見つかりました (従来方式)`);
+            } else if (source !== 'カメラ') {
+                this.updateStatus('QRコードが見つかりませんでした');
+            }
         }
+        
+        this.updateProgress(100);
+        setTimeout(() => this.updateProgress(0), 1000);
     }
 
-    processImageQuick(canvas) {
+    adjustLocationToFullImage(location, region) {
+        if (!location) return null;
+        
+        return {
+            topLeftCorner: {
+                x: location.topLeftCorner.x + region.x,
+                y: location.topLeftCorner.y + region.y
+            },
+            topRightCorner: {
+                x: location.topRightCorner.x + region.x,
+                y: location.topRightCorner.y + region.y
+            },
+            bottomLeftCorner: {
+                x: location.bottomLeftCorner.x + region.x,
+                y: location.bottomLeftCorner.y + region.y
+            },
+            bottomRightCorner: {
+                x: location.bottomRightCorner.x + region.x,
+                y: location.bottomRightCorner.y + region.y
+            }
+        };
+    }
+
+    async processImageQuick(canvas) {
         // Lighter processing for real-time scanning
         const imageData = this.ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const qrCodes = this.detectMultipleQRCodes(imageData);
         
-        if (qrCodes.length > 0) {
-            this.displayResults(qrCodes, 'リアルタイム');
+        // Use a simplified YOLO detection for real-time
+        const regions = await this.yoloDetector.detectQRRegions(imageData);
+        
+        if (regions.length > 0) {
+            const qrCodes = [];
+            
+            // Process only the most confident regions for real-time
+            const topRegions = regions
+                .sort((a, b) => b.confidence - a.confidence)
+                .slice(0, 3); // Process top 3 regions only
+            
+            for (const region of topRegions) {
+                const regionImageData = this.yoloDetector.extractRegion(imageData, region);
+                
+                try {
+                    const qrCode = jsQR(regionImageData.data, regionImageData.width, regionImageData.height);
+                    if (qrCode) {
+                        const adjustedLocation = this.adjustLocationToFullImage(qrCode.location, region);
+                        qrCodes.push({
+                            data: qrCode.data,
+                            location: adjustedLocation,
+                            region: 'YOLO-リアルタイム',
+                            regionInfo: `信頼度: ${(region.confidence * 100).toFixed(1)}%`,
+                            confidence: region.confidence
+                        });
+                    }
+                } catch (error) {
+                    console.error('Real-time QR detection error:', error);
+                }
+            }
+            
+            if (qrCodes.length > 0) {
+                this.displayResults(qrCodes, 'リアルタイム');
+            }
+        } else {
+            // Fallback to traditional quick detection
+            const qrCodes = this.detectMultipleQRCodes(imageData);
+            if (qrCodes.length > 0) {
+                this.displayResults(qrCodes, 'リアルタイム');
+            }
         }
     }
 
@@ -291,11 +444,22 @@ class MultipleQRReader {
             const resultElement = document.createElement('div');
             resultElement.className = 'qr-result';
             
+            // Add confidence indicator if available
+            const confidenceInfo = qrCode.confidence ? 
+                `<div class="confidence-indicator">
+                    <span class="confidence-label">信頼度:</span>
+                    <div class="confidence-bar">
+                        <div class="confidence-fill" style="width: ${qrCode.confidence * 100}%"></div>
+                    </div>
+                    <span class="confidence-value">${(qrCode.confidence * 100).toFixed(1)}%</span>
+                </div>` : '';
+            
             resultElement.innerHTML = `
                 <h3>QRコード ${index + 1}</h3>
                 <div class="qr-data">${this.escapeHtml(qrCode.data)}</div>
+                ${confidenceInfo}
                 <div class="qr-position">
-                    検出位置: ${qrCode.regionInfo || qrCode.region || 'フル画像'}<br>
+                    検出方式: ${qrCode.regionInfo || qrCode.region || 'フル画像'}<br>
                     ソース: ${source}<br>
                     座標: (${qrCode.location?.topLeftCorner?.x || 'N/A'}, ${qrCode.location?.topLeftCorner?.y || 'N/A'})
                 </div>
